@@ -31,6 +31,7 @@ from torch._C._functorch import (
     is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
 )
+from torch.compiler import is_compiling
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental import const_fold
@@ -383,6 +384,14 @@ def _vjp_with_argnums(
     #
     # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
     # for only the primal elements given by argnums.
+
+    # NOTE: [Compiling vjp functions]
+    # Capture func and primals before wrapping. When compiling, we re-run forward
+    # to create outputs with grad_fn inside the traced region (the original grad_fn
+    # from eager execution is lost during AOTAutograd tracing with FakeTensors).
+    captured_func = func
+    captured_primals = primals
+
     with grad_increment_nesting() as level:
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
@@ -434,13 +443,43 @@ def _vjp_with_argnums(
                     f"cotangents: {treespec_pprint(cotangents_spec)}, "
                     f"primal output: {treespec_pprint(primals_out_spec)}"
                 )
-            result = _autograd_grad(
-                flat_primals_out,
-                flat_diff_primals,
-                flat_cotangents,
-                retain_graph=retain_graph,
-                create_graph=create_graph,
-            )
+
+            if is_compiling():
+                # See NOTE: [Compiling vjp functions]
+                with torch.enable_grad():
+                    fresh_primals_out = captured_func(*captured_primals)
+                    if has_aux:
+                        fresh_primals_out, _ = fresh_primals_out
+                flat_fresh_out, _ = tree_flatten(fresh_primals_out)
+
+                if argnums is None:
+                    fresh_diff_primals = captured_primals
+                else:
+                    fresh_diff_primals = _slice_argnums(
+                        captured_primals, argnums, as_tuple=False
+                    )
+                flat_fresh_diff_primals, _ = tree_flatten(fresh_diff_primals)
+                flat_fresh_diff_primals = [
+                    p
+                    for p in flat_fresh_diff_primals
+                    if isinstance(p, torch.Tensor) and p.requires_grad
+                ]
+
+                result = _autograd_grad(
+                    flat_fresh_out,
+                    flat_fresh_diff_primals,
+                    flat_cotangents,
+                    retain_graph=retain_graph,
+                    create_graph=create_graph,
+                )
+            else:
+                result = _autograd_grad(
+                    flat_primals_out,
+                    flat_diff_primals,
+                    flat_cotangents,
+                    retain_graph=retain_graph,
+                    create_graph=create_graph,
+                )
             return tree_unflatten(result, primals_spec)
 
     if has_aux:
