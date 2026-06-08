@@ -1,5 +1,9 @@
 # A Walk Through vLLM's torch.compile Integration
 
+*Author:  [Ayush Satyam](https://github.com/ayushsatyam146), Associate MLE at Red Hat*
+
+--- 
+
 When you enable compilation in vLLM, you get faster inference. But what's actually happening under the hood? vLLM's compilation mode is not a separate compiler. It's a pipeline built on top of `torch.compile`, PyTorch's JIT compiler. In this post, we'll walk through each layer of that pipeline, from the decorator that marks a model for compilation down to the CUDA Graphs that replay GPU commands with zero overhead.
 
 To get the most out of this post, you should have a basic familiarity with vLLM and `torch.compile`. If you're new to either, the [Anatomy of vLLM](https://vllm.ai/blog/2025-09-05-anatomy-of-vllm) docs and the [torch.compiler documentation](https://pytorch.org/docs/stable/torch.compiler.html) are good starting points.
@@ -108,4 +112,4 @@ To explore the implementation, start with `vllm/compilation/decorators.py` and f
 
 ---
 
-*By [Ayush Satyam](https://github.com/ayushsatyam146), Associate MLE at Red Hat*
+
