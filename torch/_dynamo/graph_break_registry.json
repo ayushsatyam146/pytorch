@@ -96,6 +96,14 @@
   ],
   "GB0005": [
     {
+      "Gb_type": "Attempted to call str() method implemented in C/C++",
+      "Context": "",
+      "Explanation": "{type(arg.value)} has a C/C++ based str method. This is not supported.",
+      "Hints": [
+        "Write the str method in Python"
+      ]
+    },
+    {
       "Gb_type": "Attempted to a str() method implemented in C/C++",
       "Context": "",
       "Explanation": "{type(arg.value)} has a C/C++ based str method. This is not supported.",

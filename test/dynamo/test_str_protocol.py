@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for tp_str / generic_str foundation behavior in Dynamo."""
+"""Tests for tp_str / generic_str behavior in Dynamo."""
 
+import torch
+import torch.nn
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import make_dynamo_test
 
@@ -51,9 +53,140 @@ class TpStrTests(TestCase):
         assert str.__str__("hello") == "hello"  # noqa: S101
         assert str.__str__("") == ""  # noqa: S101
 
+    # -- Containers (str falls back to repr) --
+
     @make_dynamo_test
-    def test_str_list_falls_back_to_repr(self):
+    def test_str_list(self):
         assert str([1, 2, 3]) == "[1, 2, 3]"  # noqa: S101
+        assert str([]) == "[]"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_tuple(self):
+        assert str((1, 2, 3)) == "(1, 2, 3)"  # noqa: S101
+        assert str(()) == "()"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_dict(self):
+        assert str({"a": 1}) == "{'a': 1}"  # noqa: S101
+        assert str({}) == "{}"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_dict_keys_view(self):
+        result = str({"a": 1}.keys())
+        assert "dict_keys" in result  # noqa: S101
+        assert "'a'" in result  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_set(self):
+        assert str({42}) == "{42}"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_range(self):
+        assert str(range(5)) == "range(0, 5)"  # noqa: S101
+        assert str(range(1, 10, 2)) == "range(1, 10, 2)"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_list_unbound_dunder(self):
+        assert list.__str__([1, 2, 3]) == "[1, 2, 3]"  # noqa: S101
+
+    def test_str_list_with_tensor_raises_unsupported(self):
+        def fn(x):
+            return str([x])
+
+        x = torch.tensor(1)
+        self.assertIn("tensor(", fn(x))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            compiled(x)
+
+    # -- Exceptions --
+
+    @make_dynamo_test
+    def test_str_exception_no_args(self):
+        assert str(ValueError()) == ""  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_exception_one_arg(self):
+        assert str(ValueError("oops")) == "oops"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_exception_one_int_arg(self):
+        assert str(ValueError(42)) == "42"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_exception_multiple_args(self):
+        assert str(ValueError("error", 42)) == "('error', 42)"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_exception_dunder(self):
+        assert TypeError("bad type").__str__() == "bad type"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_exception_unbound_dunder(self):
+        assert ValueError.__str__(ValueError("oops")) == "oops"  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_runtime_error(self):
+        assert str(RuntimeError("runtime failure")) == "runtime failure"  # noqa: S101
+
+    # -- nn.Module --
+
+    def test_str_nn_linear(self):
+        mod = torch.nn.Linear(4, 4)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            s = str(mod)
+            if "Linear" in s:
+                return x + 1
+            return x
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), x + 1)
+
+    def test_str_nn_module_list_nonempty(self):
+        mod = torch.nn.ModuleList([torch.nn.Linear(4, 4)])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            s = str(mod)
+            if "Linear" in s:
+                return x + 1
+            return x
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), x + 1)
+
+    def test_str_nn_module_list_empty(self):
+        mod = torch.nn.ModuleList()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            s = str(mod)
+            if "ModuleList" in s:
+                return x + 1
+            return x
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), x + 1)
+
+    # -- Functions --
+
+    @make_dynamo_test
+    def test_str_function(self):
+        def my_func():
+            pass
+
+        result = str(my_func)
+        assert "my_func" in result  # noqa: S101
+
+    @make_dynamo_test
+    def test_str_lambda(self):
+        f = lambda: None  # noqa: E731
+
+        result = str(f)
+        assert "<lambda>" in result  # noqa: S101
 
 
 class FStringMutationTests(TestCase):

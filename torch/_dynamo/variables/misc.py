@@ -729,6 +729,20 @@ class ExceptionVariable(VariableTracker):
             )
         return super().var_getattr(tx, name)
 
+    def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
+        from .object_protocol import generic_str
+
+        if len(self.args) == 0:
+            return VariableTracker.build(tx, "")
+        elif len(self.args) == 1:
+            return generic_str(tx, self.args[0])
+        else:
+            from . import TupleVariable
+
+            tuple_var = TupleVariable(list(self.args))
+            return generic_str(tx, tuple_var)
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.exc_type})"
 

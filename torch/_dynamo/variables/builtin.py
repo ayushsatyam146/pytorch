@@ -400,6 +400,10 @@ class BaseBuiltinVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name == "__str__" and len(args) == 1 and not kwargs:
+            from .object_protocol import generic_str
+
+            return generic_str(tx, args[0])
         if name == "__repr__" and len(args) == 1 and not kwargs:
             arg = args[0]
             if self.as_python_constant() is object and isinstance(
@@ -1787,24 +1791,34 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_str(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(
-            arg,
-            (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
-        ):
-            if len(arg.args) == 0:
-                return VariableTracker.build(tx, "")
-            elif len(arg.args) == 1:
-                return BuiltinVariable(str).call_function(tx, [arg.args[0]], {})
-            else:
-                tuple_var = variables.TupleVariable(list(arg.args))
-                return BuiltinVariable(str).call_function(tx, [tuple_var], {})
+        from .object_protocol import generic_str
 
-        # Handle `str` on a user defined function or object
-        if isinstance(arg, (variables.UserFunctionVariable)):
-            return VariableTracker.build(tx, str(arg.fn))
-        elif isinstance(arg, (variables.UserDefinedObjectVariable)):
-            return generic_str(tx, arg)
-        return None
+        # UserDefinedObjectVariable (non-exception) still uses legacy path
+        # until str_impl lands on that class.
+        if isinstance(arg, variables.UserDefinedObjectVariable) and not isinstance(
+            arg,
+            variables.UserDefinedExceptionObjectVariable,
+        ):
+            if type(arg.value).__str__ is object.__str__:
+                return generic_str(tx, arg)
+            elif is_wrapper_or_member_descriptor(arg.value.__str__):
+                unimplemented(
+                    gb_type="Attempted to call str() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based str method. "
+                    "This is not supported.",
+                    hints=["Write the str method in Python"],
+                )
+            else:
+                bound_method = arg.value.__str__.__func__  # type: ignore[attr-defined]
+                try:
+                    user_func_variable = VariableTracker.build(tx, bound_method)
+                except AssertionError:
+                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
+                    return None
+                return user_func_variable.call_function(tx, [arg], {})
+
+        return generic_str(tx, arg)
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
